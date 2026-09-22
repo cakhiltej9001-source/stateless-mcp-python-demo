@@ -4,9 +4,9 @@
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-7C3AED)](https://modelcontextprotocol.io/)
 [![Tests](https://img.shields.io/badge/tests-3%20passing-2EA44F)](#automated-verification)
 
-![MCP basics sticker](https://img.shields.io/badge/%F0%9F%A7%A0-MCP%20basics-2563EB?style=for-the-badge)
-![Handshake sticker](https://img.shields.io/badge/%F0%9F%A4%9D-Handshake-F59E0B?style=for-the-badge)
-![Stateless flow sticker](https://img.shields.io/badge/%F0%9F%9A%80-Stateless%20flow-16A34A?style=for-the-badge)
+[![MCP basics sticker](https://img.shields.io/badge/%F0%9F%A7%A0-MCP%20basics-2563EB?style=for-the-badge)](#mcp-basics)
+[![Handshake sticker](https://img.shields.io/badge/%F0%9F%A4%9D-Handshake-F59E0B?style=for-the-badge)](#stateful-handshake)
+[![Stateless flow sticker](https://img.shields.io/badge/%F0%9F%9A%80-Stateless%20flow-16A34A?style=for-the-badge)](#stateless-flow)
 
 A dependency-free Python implementation of the stateless-first concepts in
 [SEP-2575: Make MCP Stateless](https://modelcontextprotocol.io/seps/2575-stateless-mcp).
@@ -15,6 +15,8 @@ multi-round-trip requests, signed request state, and final special responses.
 
 > 🧩 **Learning path:** What is MCP? → How the older handshake works → Why
 > stateless MCP? → Run the demo → Practice interview questions.
+
+<a id="mcp-basics"></a>
 
 ## 🧠 What is MCP?
 
@@ -55,6 +57,8 @@ over standard input/output (`stdio`) or Streamable HTTP. In this repository the
 client calls a tool over HTTP and the server asks the person for confirmation
 before returning a result. See the [MCP protocol overview](https://modelcontextprotocol.io/specification/2026-07-28/basic/index).
 
+<a id="stateful-handshake"></a>
+
 ## 🤝 How the older stateful handshake works
 
 In the **2025-11-25 protocol revision**, the client and server establish their
@@ -89,6 +93,8 @@ defines the exact sequence.
 > 📌 **Interview distinction:** “Stateful” here describes protocol context
 > retained across requests. The three-step initialization and a transport
 > session are related but not identical concepts.
+
+<a id="stateless-flow"></a>
 
 ## 🚀 Why stateless MCP?
 
