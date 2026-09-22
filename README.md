@@ -29,6 +29,27 @@ The server can expose:
 | 📚 **Resources** | Data the application can read | A document or database record |
 | 🧾 **Prompts** | Reusable prompt templates | A code review prompt |
 
+### MCP ecosystem
+
+```mermaid
+flowchart LR
+    U[👤 User] --> H[🤖 MCP Host<br/>AI application]
+    H --> C[🔌 MCP Client]
+    C <-->|JSON-RPC 2.0<br/>stdio or HTTP| S[🖥️ MCP Server]
+    S --> T[🛠️ Tools]
+    S --> R[📚 Resources]
+    S --> P[🧾 Prompts]
+
+    classDef person fill:#fef3c7,stroke:#d97706,color:#111827
+    classDef app fill:#dbeafe,stroke:#2563eb,color:#111827
+    classDef server fill:#dcfce7,stroke:#16a34a,color:#111827
+    classDef feature fill:#f3e8ff,stroke:#9333ea,color:#111827
+    class U person
+    class H,C app
+    class S server
+    class T,R,P feature
+```
+
 MCP messages use JSON-RPC 2.0. The transport carries those messages, commonly
 over standard input/output (`stdio`) or Streamable HTTP. In this repository the
 client calls a tool over HTTP and the server asks the person for confirmation
@@ -40,19 +61,20 @@ In the **2025-11-25 protocol revision**, the client and server establish their
 shared protocol context before normal tool calls. This was the required
 initialization sequence for that revision:
 
-```text
-MCP client                              MCP server
-    │                                       │
-    │  1. initialize                        │
-    │     version + client capabilities     │
-    ├──────────────────────────────────────>│
-    │  2. initialize result                 │
-    │     version + server capabilities     │
-    │<──────────────────────────────────────┤
-    │  3. notifications/initialized         │
-    ├──────────────────────────────────────>│
-    │  4. tools/list, tools/call, ...       │
-    ├──────────────────────────────────────>│
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Client as 🔌 MCP Client
+    participant Server as 🖥️ MCP Server
+
+    Client->>Server: initialize<br/>protocol version + client capabilities + client info
+    Server-->>Client: initialize result<br/>selected version + server capabilities + server info
+    Client->>Server: notifications/initialized
+    Note over Client,Server: Shared protocol context is now established
+    User->>Client: Request an action
+    Client->>Server: tools/list or tools/call
+    Server-->>Client: Result using negotiated session context
 ```
 
 The client starts by proposing a protocol version and announcing features it
@@ -91,19 +113,79 @@ workers to understand each request without a session-specific route. See
 | Mid-call server request | `input_required` embeds `elicitation/create` |
 | Resume a broken exchange | Client retries with a new JSON-RPC request ID |
 
+### Scaling difference
+
+```mermaid
+flowchart TB
+    subgraph OLD[🤝 Earlier stateful flow]
+        direction LR
+        OC[Client] --> OLB[Load balancer]
+        OLB -->|sticky route| O1[Server A<br/>holds session]
+        OLB -.->|cannot safely switch| O2[Server B<br/>no session context]
+    end
+
+    subgraph NEW[🚀 Stateless flow]
+        direction LR
+        NC[Self-contained request] --> NLB[Load balancer]
+        NLB --> N1[Server A]
+        NLB --> N2[Server B]
+        NLB --> N3[Server C]
+    end
+
+    classDef client fill:#dbeafe,stroke:#2563eb,color:#111827
+    classDef router fill:#fef3c7,stroke:#d97706,color:#111827
+    classDef worker fill:#dcfce7,stroke:#16a34a,color:#111827
+    class OC,NC client
+    class OLB,NLB router
+    class O1,O2,N1,N2,N3 worker
+```
+
 ## 🗺️ Architecture
 
-```text
-Client                                      Stateless server
-  │ tools/call: id=1 + metadata/capabilities       │
-  ├────────────────────────────────────────────────>│
-  │       input_required + elicitation + state      │
-  │<────────────────────────────────────────────────┤
-  │ collect human confirmation                      │
-  │ tools/call: id=2 + response + echoed state      │
-  ├────────────────────────────────────────────────>│
-  │                     complete result              │
-  │<────────────────────────────────────────────────┤
+### Repository components
+
+```mermaid
+flowchart LR
+    User[👤 User] --> Client[demo_client.py<br/>HTTP + JSON-RPC client]
+    Client -->|POST /mcp| HTTP[server.py<br/>ThreadingHTTPServer]
+    HTTP --> Core[stateless_mcp.py<br/>request validation + dispatch]
+    Core --> Tool[confirm_operation<br/>tool handler]
+    Tool --> Codec[RequestStateCodec<br/>HMAC-SHA256 + expiry]
+    Core --> Response{Result type}
+    Response -->|needs confirmation| Input[input_required<br/>elicitation/create]
+    Response -->|answer verified| Complete[complete<br/>tool result]
+    Tests[tests/test_stateless_mcp.py] -. verifies .-> Core
+
+    classDef entry fill:#dbeafe,stroke:#2563eb,color:#111827
+    classDef logic fill:#dcfce7,stroke:#16a34a,color:#111827
+    classDef state fill:#fef3c7,stroke:#d97706,color:#111827
+    classDef result fill:#f3e8ff,stroke:#9333ea,color:#111827
+    class User,Client,HTTP entry
+    class Core,Tool,Tests logic
+    class Codec state
+    class Response,Input,Complete result
+```
+
+### Stateless elicitation sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Client as demo_client.py
+    participant Server as server.py
+    participant Core as stateless_mcp.py
+
+    Client->>Server: tools/call (ID 1)<br/>version + capabilities + arguments
+    Server->>Core: Validate headers and per-request _meta
+    Core->>Core: Mint signed, expiring requestState
+    Core-->>Client: input_required<br/>elicitation/create + requestState
+    Client->>User: Allow this operation?
+    User-->>Client: Confirm
+    Client->>Server: tools/call (ID 2)<br/>inputResponses + same arguments + requestState
+    Server->>Core: Validate the new self-contained request
+    Core->>Core: Verify signature, expiry, and argument binding
+    Core-->>Client: complete<br/>Completed operation
 ```
 
 ## ✨ Implemented concepts
