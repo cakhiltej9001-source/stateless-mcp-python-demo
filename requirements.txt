@@ -1,1 +1,4 @@
-# No third-party packages are required.
+# MCP Python SDK v2 provides MCPServer, Client, Resolve, and Elicit.
+mcp>=2,<3
+pydantic>=2,<3
+anyio>=4,<5

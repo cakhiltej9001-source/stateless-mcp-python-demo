@@ -1,111 +1,98 @@
-"""Run the stateful and stateless MCP demonstrations."""
+"""
+TASK 1 - MCP CLIENT
+-------------------
 
-import argparse
-import json
-from urllib.request import Request, urlopen
+This client connects to the server, discovers its tools, calls
+provision_database, handles the elicitation request, asks the human for a
+region, and prints the final result.
+"""
+
+import anyio
+import sys
+
+from mcp import Client
+from mcp.client import ClientRequestContext
+from mcp.types import (
+    ElicitRequestParams,
+    ElicitRequestURLParams,
+    ElicitResult,
+    TextContent,
+)
+
+# Keep the decorative status output readable in redirected Windows consoles too.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
-URL = "http://127.0.0.1:8000/mcp"
-STATEFUL_VERSION = "2025-11-25"
-STATELESS_VERSION = "2026-07-28"
+async def handle_elicitation(
+    context: ClientRequestContext,
+    params: ElicitRequestParams,
+) -> ElicitResult:
+    """
+    Display an MCP elicitation request and return the human's answer.
 
+    One callback handles both URL and form elicitation. This demo needs only
+    form elicitation, so URL requests are printed and cancelled safely.
+    """
 
-def send(request_id, method, params, version, session_id=None):
-    payload = {"jsonrpc": "2.0", "method": method, "params": params}
-    if request_id is not None:
-        payload["id"] = request_id
+    # URL elicitation is used for out-of-band flows such as OAuth or payment.
+    if isinstance(params, ElicitRequestURLParams):
+        print("\n🌐 Server requested URL interaction:")
+        print(params.url)
+        return ElicitResult(action="cancel")
 
-    headers = {
-        "Content-Type": "application/json",
-        "MCP-Protocol-Version": version,
-    }
-    if session_id:
-        headers["Mcp-Session-Id"] = session_id
+    print("\n🤖 MCP server needs additional information:")
+    print(params.message)
 
-    request = Request(
-        URL,
-        data=json.dumps(payload).encode(),
-        headers=headers,
-        method="POST",
+    region = input(
+        "\nEnter region (example: ap-south-1) or type 'cancel': "
+    ).strip()
+
+    if region.lower() == "cancel":
+        return ElicitResult(action="cancel")
+
+    if not region:
+        print("⚠️ No region entered. Cancelling.")
+        return ElicitResult(action="cancel")
+
+    # The content keys must match the server-side RegionChoice model.
+    return ElicitResult(
+        action="accept",
+        content={"region": region},
     )
-    with urlopen(request) as response:
-        body = response.read()
-        value = json.loads(body) if body else None
-        return value, response.headers.get("Mcp-Session-Id")
 
 
-def stateful_demo():
-    print("\n=== STATEFUL INITIALIZATION HANDSHAKE ===")
-    print("1. Client -> initialize")
-    initialized, session_id = send(
-        1,
-        "initialize",
-        {
-            "protocolVersion": STATEFUL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "demo-client", "version": "1.0"},
-        },
-        STATEFUL_VERSION,
-    )
-    print("2. Server -> selected version:", initialized["result"]["protocolVersion"])
-    print("   Server created session:", session_id)
+async def main() -> None:
+    """Connect to the MCP server and run the elicitation workflow."""
 
-    print("3. Client -> notifications/initialized")
-    send(None, "notifications/initialized", {}, STATEFUL_VERSION, session_id)
+    async with Client(
+        "http://127.0.0.1:8000/mcp",
+        elicitation_callback=handle_elicitation,
+    ) as client:
+        print("\n✅ Connected to MCP server")
+        print("📡 Protocol version:", client.protocol_version)
 
-    print("4. Client -> tools/call using the stored session")
-    completed, _ = send(
-        2,
-        "tools/call",
-        {"name": "greet", "arguments": {"name": "Akhil"}},
-        STATEFUL_VERSION,
-        session_id,
-    )
-    print("5. Server ->", completed["result"]["content"][0]["text"])
-    print("Result: later requests depend on server session memory.")
+        tools_result = await client.list_tools()
+        print("\n🔧 Available MCP tools:")
+        for tool in tools_result.tools:
+            print(f"- {tool.name}: {tool.description}")
 
+        print("\n🚀 Calling provision_database...")
 
-def stateless_demo(auto_confirm=False):
-    print("\n=== STATELESS FLOW ===")
-    tool_call = {"name": "greet", "arguments": {"name": "Akhil"}}
+        # Only name is model supplied. The hidden resolver parameter asks
+        # the human for region through MCP elicitation.
+        result = await client.call_tool(
+            "provision_database",
+            {"name": "orders-db"},
+        )
 
-    print("1. Client -> tools/call (no initialize and no session ID)")
-    first, _ = send(1, "tools/call", tool_call, STATELESS_VERSION)
-    print("2. Server ->", first["result"]["resultType"])
-
-    prompt = first["result"]["inputRequests"]["confirm"]["params"]["message"]
-    confirmed = auto_confirm or input(f"3. {prompt} [y/N] ").lower() in {"y", "yes"}
-    if auto_confirm:
-        print("3. User confirmation -> yes")
-
-    retry = {
-        **tool_call,
-        "inputResponses": {
-            "confirm": {
-                "action": "accept",
-                "content": {"confirmed": confirmed},
-            }
-        },
-    }
-    print("4. Client -> new self-contained tools/call")
-    completed, _ = send(2, "tools/call", retry, STATELESS_VERSION)
-    print("5. Server ->", completed["result"]["content"][0]["text"])
-    print("Result: no server session is required.")
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "demo", choices=["stateful", "stateless", "both"], nargs="?", default="both"
-    )
-    parser.add_argument("--yes", action="store_true", help="auto-confirm the prompt")
-    args = parser.parse_args()
-
-    if args.demo in {"stateful", "both"}:
-        stateful_demo()
-    if args.demo in {"stateless", "both"}:
-        stateless_demo(args.yes)
+        print("\n✅ Final MCP result:")
+        for block in result.content:
+            if isinstance(block, TextContent):
+                print(block.text)
+            else:
+                print(block)
 
 
 if __name__ == "__main__":
-    main()
+    anyio.run(main)
