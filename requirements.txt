@@ -1,3 +1,1 @@
-# Runtime: Python standard library only.
-# Development helper used by scripts/generate_screenshots.py:
-Pillow>=11,<13
+# No third-party packages are required.
