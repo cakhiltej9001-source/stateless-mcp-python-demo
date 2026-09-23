@@ -7,6 +7,7 @@ provision_database, handles the elicitation request, asks the human for a
 region, and prints the final result.
 """
 
+import argparse
 import anyio
 import sys
 
@@ -62,14 +63,18 @@ async def handle_elicitation(
     )
 
 
-async def main() -> None:
+async def main(mode: str) -> None:
     """Connect to the MCP server and run the elicitation workflow."""
 
     async with Client(
         "http://127.0.0.1:8000/mcp",
+        # "auto" negotiates the modern stateless protocol.
+        # "legacy" explicitly performs initialize/initialized first.
+        mode="legacy" if mode == "stateful" else "auto",
         elicitation_callback=handle_elicitation,
     ) as client:
         print("\n✅ Connected to MCP server")
+        print("🔄 Demo mode:", mode)
         print("📡 Protocol version:", client.protocol_version)
 
         tools_result = await client.list_tools()
@@ -95,4 +100,13 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    anyio.run(main)
+    parser = argparse.ArgumentParser(description="Run the MCP client demo.")
+    parser.add_argument(
+        "mode",
+        choices=("stateless", "stateful"),
+        nargs="?",
+        default="stateless",
+        help="Choose modern stateless flow or the legacy initialization handshake.",
+    )
+    args = parser.parse_args()
+    anyio.run(main, args.mode)

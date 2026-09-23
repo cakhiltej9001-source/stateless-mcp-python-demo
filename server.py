@@ -10,6 +10,7 @@ the cloud region. This prevents the model from guessing an important value.
 No real AWS, Azure, or Google Cloud resource is created.
 """
 
+import argparse
 from typing import Annotated
 
 from pydantic import BaseModel, Field
@@ -89,18 +90,22 @@ async def provision_database(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the MCP database demo.")
+    parser.add_argument(
+        "--mode",
+        choices=("stateless", "stateful"),
+        default="stateless",
+        help="Use modern stateless HTTP by default or the legacy session flow.",
+    )
+    args = parser.parse_args()
+
     # Streamable HTTP endpoint: http://127.0.0.1:8000/mcp
-    #
-    # stateless_http=True:
-    #   Requests do not depend on a hidden persistent HTTP session.
-    #
-    # json_response=True:
-    #   Each POST receives a normal JSON response. Resolver-based elicitation
-    #   still works through the modern multi-round-trip mechanism.
+    # In stateful mode, the SDK keeps a session and a request-scoped channel
+    # for legacy server-to-client elicitation.
     mcp.run(
         transport="streamable-http",
         host="127.0.0.1",
         port=8000,
-        stateless_http=True,
-        json_response=True,
+        stateless_http=args.mode == "stateless",
+        json_response=args.mode == "stateless",
     )

@@ -9,10 +9,10 @@
 [![Stateless](https://img.shields.io/badge/%F0%9F%9A%80-STATELESS%20FLOW-16A34A?style=for-the-badge)](#why-stateless-mcp)
 [![Interview](https://img.shields.io/badge/%F0%9F%8E%A4-INTERVIEW%20PREP-9333EA?style=for-the-badge)](#common-interview-questions)
 
-This beginner-friendly project uses the official MCP Python SDK v2 to
-demonstrate a stateless tool that needs a human decision. The client supplies a
-database name; the server asks the human which cloud region to use; then the
-tool returns a demo result.
+This beginner-friendly project uses the official MCP Python SDK v2 to run the
+same human-in-the-loop tool through both the legacy stateful handshake and the
+modern stateless protocol. The client supplies a database name; the server asks
+the human which cloud region to use; then the tool returns a demo result.
 
 > 🧪 **No real cloud database is created.** This project demonstrates protocol
 > behavior only.
@@ -21,6 +21,9 @@ tool returns a demo result.
 
 ```text
 stateless-mcp-python-demo/
+├── assets/
+│   ├── stateful-elicitation-output.png
+│   └── stateless-elicitation-output.png
 ├── server.py          # MCP tool, resolver, and HTTP server
 ├── client.py          # Tool discovery and human elicitation callback
 ├── requirements.txt   # MCP SDK v2 and its direct dependencies
@@ -61,9 +64,10 @@ flowchart LR
 The `provision_database` tool accepts a name from the client. Its
 `region_choice` parameter is marked with `Resolve(ask_region)`, so the
 region is hidden from the model-facing tool arguments and obtained through
-human elicitation instead.
+human elicitation instead. The server and client each accept a mode so you can
+compare both protocol generations with the same tool.
 
-1. The client connects to the stateless Streamable HTTP endpoint.
+1. Start the server in either stateful or stateless mode.
 2. The client discovers the server's tools.
 3. The client calls `provision_database(name="orders-db")`.
 4. The resolver returns an `Elicit` form asking which region to use.
@@ -129,6 +133,27 @@ sequenceDiagram
     Server-->>Client: tool result
 ```
 
+### ▶️ Run the stateful handshake
+
+Start the server:
+
+```powershell
+python server.py --mode stateful
+```
+
+In a second terminal, run the client:
+
+```powershell
+python client.py stateful
+```
+
+The client explicitly selects legacy mode, so the SDK performs
+`initialize → initialize result → notifications/initialized`. The stateful
+server keeps a session and a request channel while the human answers the
+elicitation.
+
+![Stateful MCP run showing the legacy protocol version and database elicitation](assets/stateful-elicitation-output.png)
+
 ## 🚀 Why stateless MCP?
 
 The `2026-07-28` protocol revision removes the initialization handshake and
@@ -142,12 +167,54 @@ answer in a new request.
 | Negotiate once during initialization | Include current context per request |
 | Later requests may depend on a session | Process requests independently |
 | May need sticky load-balancer routing | Any healthy worker can handle the request |
-| User interaction can depend on an open channel | Return input-needed state and retry |
+| User interaction uses the session channel | Return input-required state and continue on a new request |
+
+### 🔀 Same tool, different wire flow
+
+```mermaid
+flowchart TB
+    subgraph LEGACY[🤝 Stateful · 2025-11-25]
+        direction LR
+        L1[initialize] --> L2[server creates session]
+        L2 --> L3[initialized notification]
+        L3 --> L4[tool call]
+        L4 --> L5[server asks client on session channel]
+        L5 --> L6[tool completes]
+    end
+
+    subgraph MODERN[🚀 Stateless · 2026-07-28]
+        direction LR
+        M1[tool call] --> M2[input_required result]
+        M2 --> M3[client asks human]
+        M3 --> M4[new request includes answer]
+        M4 --> M5[tool completes on any worker]
+    end
+```
 
 Stateless protocol behavior makes independent request routing easier. It does
 not prevent an application from storing durable data in a database. Any state
 needed to continue an operation must be available to whichever worker handles
 the next request.
+
+### ▶️ Run the stateless flow
+
+Start the default stateless server:
+
+```powershell
+python server.py --mode stateless
+```
+
+In another terminal:
+
+```powershell
+python client.py stateless
+```
+
+The SDK negotiates `2026-07-28`. The resolver returns `input_required`;
+the client gathers the answer and the SDK continues with a new, self-contained
+request. No persistent HTTP session is used.
+
+![Stateless MCP run showing the modern protocol version and elicitation result](assets/stateless-elicitation-output.png)
 
 ## ▶️ Run locally
 
@@ -160,7 +227,8 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Start the server in the first terminal:
+Choose one matching server/client mode from the sections above. The stateless
+mode is the default:
 
 ```powershell
 python server.py
@@ -169,7 +237,7 @@ python server.py
 Run the client in a second terminal:
 
 ```powershell
-python client.py
+python client.py stateless
 ```
 
 When prompted, enter a region such as `ap-south-1`. The expected final line
@@ -185,8 +253,8 @@ Demo database 'orders-db' was successfully provisioned in region 'ap-south-1'.
 - `server.py → ask_region()`: describes the question presented to the human.
 - `server.py → provision_database()`: handles accepted, declined, and
   cancelled outcomes.
-- `server.py → mcp.run()`: starts stateless Streamable HTTP with JSON
-  responses.
+- `server.py → mcp.run()`: selects stateless JSON responses or the stateful
+  session transport based on `--mode`.
 - `client.py → handle_elicitation()`: gathers the human's answer.
 - `client.py → main()`: connects, discovers tools, calls the tool, and prints
   the result.
